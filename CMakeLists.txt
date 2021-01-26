@@ -11,6 +11,7 @@ project(kissnet_ci
 enable_testing()
 
 option(kissnet_BUILD_TESTING "build test programs")
+option(kissnet_BUILD_MINIMAL "build minimal executable" ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS on)
 
@@ -25,12 +26,14 @@ target_include_directories(kissnet INTERFACE
 
 find_package(OpenSSL)
 
-add_executable(minimal kissnet.cpp)
-add_test(NAME HasOpenSSL COMMAND $<TARGET_FILE:minimal>)
-target_link_libraries(minimal PRIVATE kissnet)
-if(OpenSSL_FOUND)
-  target_link_libraries(minimal PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-  target_compile_definitions(minimal PRIVATE KISSNET_USE_OPENSSL)
+if(kissnet_BUILD_MINIMAL)
+  add_executable(minimal kissnet.cpp)
+  add_test(NAME HasOpenSSL COMMAND $<TARGET_FILE:minimal>)
+  target_link_libraries(minimal PRIVATE kissnet)
+  if(OpenSSL_FOUND)
+    target_link_libraries(minimal PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(minimal PRIVATE KISSNET_USE_OPENSSL)
+  endif()
 endif()
 
 if(kissnet_BUILD_TESTING)
