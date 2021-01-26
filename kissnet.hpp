@@ -103,7 +103,7 @@
 #ifndef KISS_NET
 #define KISS_NET
 
- ///Define this to not use exceptions
+///Define this to not use exceptions
 #ifndef KISSNET_NO_EXCEP
 #define kissnet_fatal_error(STR) throw std::runtime_error(STR)
 #else
@@ -122,17 +122,16 @@
 #include <utility>
 
 #ifdef _WIN32
-
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <vector>
 #define WIN32_LEAN_AND_MEAN
 
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif //endif nominmax
 
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#include <Windows.h>
 
 using ioctl_setting = u_long;
 using buffsize_t = int;
@@ -154,7 +153,7 @@ inline const char* inet_ntop(int af, const void* src, char* dst, socklen_t size)
 	} addr;
 	int res;
 	memset(&addr, 0, sizeof(addr));
-	addr.sa.sa_family = af;
+	addr.sa.sa_family = static_cast<unsigned short>(af);
 	if (af == AF_INET6)
 	{
 		memcpy(&addr.sai6.sin6_addr, src, sizeof(addr.sai6.sin6_addr));
@@ -163,8 +162,16 @@ inline const char* inet_ntop(int af, const void* src, char* dst, socklen_t size)
 	{
 		memcpy(&addr.sai.sin_addr, src, sizeof(addr.sai.sin_addr));
 	}
-	res = WSAAddressToStringA(&addr.sa, sizeof(addr), 0, dst, reinterpret_cast<LPDWORD>(&size));
-	if (res != 0) return NULL;
+
+	auto buffer = std::vector<WCHAR>(static_cast<size_t>(size));
+	res = WSAAddressToStringW(&addr.sa, sizeof(addr), nullptr, &buffer[0], reinterpret_cast<LPDWORD>(&size));
+	if(res != 0)
+	{
+		return nullptr;
+	}
+
+	size_t i = 0;
+	wcstombs_s(&i, dst, static_cast<size_t>(size), &buffer[0], static_cast<size_t>(size));
 	return dst;
 }
 
@@ -308,7 +315,7 @@ namespace kissnet
 #include <errno.h>
 #include <fcntl.h>
 
-using ioctl_setting = int;
+using ioctl_setting = unsigned long;
 using buffsize_t = size_t;
 
 //To get consistent socket API between Windows and Linux:
@@ -466,16 +473,17 @@ namespace kissnet
 			switch (addr->sa_family)
 			{
 			case AF_INET: {
-				auto ip_addr = (SOCKADDR_IN*)(addr);
-				address = inet_ntoa(ip_addr->sin_addr);
+				auto *ip_addr = reinterpret_cast<SOCKADDR_IN*>(addr);
+				std::array<char, INET_ADDRSTRLEN> buffer {' '};
+				address = inet_ntop(AF_INET, &(ip_addr->sin_addr), buffer.data(), INET_ADDRSTRLEN);
 				port = ntohs(ip_addr->sin_port);
 			}
 						break;
 
 			case AF_INET6: {
-				auto ip_addr = (sockaddr_in6*)(addr);
-				char buffer[INET6_ADDRSTRLEN];
-				address = inet_ntop(AF_INET6, &(ip_addr->sin6_addr), buffer, INET6_ADDRSTRLEN);
+				auto *ip_addr = reinterpret_cast<sockaddr_in6*>(addr);
+				std::array<char, INET6_ADDRSTRLEN> buffer {' '};
+				address = inet_ntop(AF_INET6, &(ip_addr->sin6_addr), buffer.data(), INET6_ADDRSTRLEN);
 				port = ntohs(ip_addr->sin6_port);
 			}
 						 break;
@@ -741,13 +749,13 @@ namespace kissnet
 						tv.tv_sec = static_cast<long>(timeout / 1000);
 						tv.tv_usec = 1000 * static_cast<long>(timeout % 1000);
 
-						fd_set fd_write, fd_except;;
+						fd_set fd_write, fd_except;
 						FD_ZERO(&fd_write);
 						FD_SET(sock, &fd_write);
 						FD_ZERO(&fd_except);
 						FD_SET(sock, &fd_except);
 
-						int ret = syscall_select(static_cast<int>(sock) + 1, NULL, &fd_write, &fd_except, &tv);
+						int ret = syscall_select(static_cast<int>(sock) + 1, nullptr, &fd_write, &fd_except, &tv);
 						if (ret == -1)
 							error = get_error_code();
 						else if (ret == 0)
@@ -909,7 +917,7 @@ namespace kissnet
 		{
 #ifdef _WIN32
 			ioctl_setting set = state ? 1 : 0;
-			if (ioctlsocket(sock, FIONBIO, &set) < 0)
+			if (ioctlsocket(sock, static_cast<long>(FIONBIO), &set) < 0)
 #else
 			const auto flags = fcntl(sock, F_GETFL, 0);
 			const auto newflags = state ? flags | O_NONBLOCK : flags ^ O_NONBLOCK;
@@ -1150,7 +1158,7 @@ namespace kissnet
 		///Send some bytes through the pipe
 		bytes_with_status send(const std::byte* read_buff, size_t length)
 		{
-			auto received_bytes{ 0 };
+			auto received_bytes{ 0L };
 			if constexpr (sock_proto == protocol::tcp)
 			{
 				received_bytes = syscall_send(sock, reinterpret_cast<const char*>(read_buff), static_cast<buffsize_t>(length), 0);
@@ -1183,7 +1191,7 @@ namespace kissnet
 		template <size_t buff_size>
 		bytes_with_status recv(buffer<buff_size>& write_buff, size_t start_offset = 0)
 		{
-			auto received_bytes = 0;
+			auto received_bytes = 0L;
 			if constexpr (sock_proto == protocol::tcp)
 			{
 				received_bytes = syscall_recv(sock, reinterpret_cast<char*>(write_buff.data()) + start_offset, static_cast<buffsize_t>(buff_size - start_offset), 0);
@@ -1290,7 +1298,10 @@ namespace kissnet
 			}
 			if constexpr (sock_proto == protocol::udp)
 			{
-				return { (sockaddr*)&socket_input };
+				return {
+					const_cast<sockaddr*>(
+						reinterpret_cast<const sockaddr*>(&socket_input))
+				};
 			}
 		}
 
