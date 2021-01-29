@@ -896,7 +896,7 @@ namespace kissnet
 				}
 			}
 
-			if (sock == INVALID_SOCKET)
+			if (sock == INVALID_SOCKET || socket_addrinfo == nullptr)
 			{
 				kissnet_fatal_error("unable to create socket!");
 			}
